@@ -1,0 +1,64 @@
+name: Daily Auto Post
+
+on:
+  schedule:
+    # 21:00 JST = 12:00 UTC
+    - cron: "0 12 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install Japanese fonts
+        run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate content + image
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python -m src.main prepare
+
+      - name: Commit and push generated files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add posts/
+          if git diff --cached --quiet; then
+            echo "no new files to commit"
+          else
+            git commit -m "chore: daily post $(TZ=Asia/Tokyo date +%Y-%m-%d)"
+            git push
+          fi
+
+      - name: Wait for raw URL to propagate
+        run: sleep 20
+
+      - name: Post to X and Instagram
+        env:
+          X_API_KEY: ${{ secrets.X_API_KEY }}
+          X_API_SECRET: ${{ secrets.X_API_SECRET }}
+          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          PUBLIC_IMAGE_BASE_URL: https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}
+          POST_TO_X: "true"
+          POST_TO_INSTAGRAM: "true"
+        run: python -m src.main post
